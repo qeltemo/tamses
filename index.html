@@ -1,0 +1,567 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0d1319">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Frekans">
+<title>Frekans Ölçer</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Yerleşim: tek sütun ölçü aleti; üstte büyük okuma, altında spektrum + şelale, en altta ton üreteci. */
+:root{
+  --bg:#0d1319; --panel:#141c24; --line:#243240; --fg:#dfe7ee; --muted:#8597a8;
+  --accent:#ffb347; --accent-2:#5fd1c4; --warn:#ff6b5e;
+  --f-display:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;
+  --f-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  color-scheme:dark;
+  padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--fg)}
+body{font:15px/1.45 var(--f-body);-webkit-text-size-adjust:100%;
+  padding-left:max(14px,env(safe-area-inset-left,0px));padding-right:max(14px,env(safe-area-inset-right,0px))}
+[hidden]{display:none!important}
+.wrap{max-width:860px;margin:0 auto;padding-block:12px 28px;display:flex;flex-direction:column;gap:14px}
+header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap}
+h1{font:600 22px/1 var(--f-display);letter-spacing:.06em;text-transform:uppercase;margin:0}
+h1 span{color:var(--accent)}
+.meta{font:12px var(--f-mono);color:var(--muted)}
+.banner{border:1px solid var(--warn);color:var(--warn);border-radius:8px;padding:10px 12px;font-size:14px}
+section.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:12px}
+.label{font:500 11px var(--f-body);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+
+/* Büyük okuma */
+.readout{display:grid;grid-template-columns:1fr auto;gap:4px 16px;align-items:end}
+.big{font:600 clamp(48px,15vw,92px)/.9 var(--f-display);font-variant-numeric:tabular-nums;color:var(--accent);letter-spacing:.01em;min-width:0}
+.big small{font-size:.38em;color:var(--muted);margin-left:.15em;font-weight:500}
+.side{display:flex;flex-direction:column;gap:6px;text-align:right;font:500 15px var(--f-mono);font-variant-numeric:tabular-nums}
+.side b{display:block;font:500 10px var(--f-body);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.peaks{display:flex;flex-wrap:wrap;gap:6px;font:13px var(--f-mono);font-variant-numeric:tabular-nums}
+.peaks span{border:1px solid var(--line);border-radius:999px;padding:3px 9px;color:var(--fg)}
+.peaks span:first-child{border-color:var(--accent);color:var(--accent)}
+.peaks em{font-style:normal;color:var(--muted);margin-left:6px}
+
+canvas{display:block;width:100%;border-radius:6px;background:#0a0f14;touch-action:none}
+#spec{height:clamp(200px,42vh,360px)}
+#wf{height:120px}
+
+/* Kontroller */
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.row > label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted);min-width:0}
+select,input[type=text],input[type=number]{font:15px var(--f-mono);background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:7px;padding:9px 10px;min-height:42px}
+select{padding-right:6px}
+button{font:600 15px var(--f-body);border-radius:8px;border:1px solid var(--line);background:#1b2631;color:var(--fg);padding:10px 14px;min-height:44px;cursor:pointer;touch-action:manipulation}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--accent-2);outline-offset:2px}
+button.primary{background:var(--accent);border-color:var(--accent);color:#1a1205}
+button.primary.on{background:var(--warn);border-color:var(--warn);color:#1a0705}
+button.ghost{background:transparent}
+button.small{padding:8px 10px;min-height:40px;font:500 14px var(--f-mono)}
+button[aria-pressed=true]{border-color:var(--accent-2);color:var(--accent-2)}
+.grow{flex:1 1 140px}
+
+/* Üreteç */
+.gen-top{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:end}
+.freq-in{display:flex;align-items:center;gap:8px}
+.freq-in input{font:600 32px var(--f-display);font-variant-numeric:tabular-nums;width:100%;min-width:0;padding:6px 10px;color:var(--accent-2)}
+.freq-in span{font:500 18px var(--f-display);color:var(--muted)}
+input[type=range]{width:100%;accent-color:var(--accent-2);height:32px}
+.steps{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px}
+.presets{display:flex;flex-wrap:wrap;gap:6px}
+.err{color:var(--warn);font-size:13px;min-height:1em}
+.note{font-size:13px;color:var(--muted);max-width:68ch}
+.note li{margin-bottom:4px}
+details summary{cursor:pointer;color:var(--fg);font-weight:500}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Frekans <span>Ölçer</span></h1>
+    <div class="meta" id="meta">20 Hz – 20 kHz · hazır</div>
+  </header>
+
+  <div class="banner" id="secureWarn" hidden>Mikrofon yalnızca güvenli (https://) bağlantıda çalışır. Sayfayı https adresinden açın. Ton üreteci ve “Dahili döngü” testi yine de çalışır.</div>
+
+  <section class="panel" aria-label="Analiz">
+    <div class="readout">
+      <div class="big" id="peakHz" aria-live="off">—<small>Hz</small></div>
+      <div class="side">
+        <div><b>Nota</b><span id="peakNote">—</span></div>
+        <div><b>Tepe (dBFS)</b><span id="peakDb">— dB</span></div>
+        <div><b>Seviye (RMS)</b><span id="rmsDb">— dBFS</span></div>
+      </div>
+    </div>
+    <div>
+      <div class="label" style="margin-bottom:6px">En güçlü 5 tepe</div>
+      <div class="peaks" id="peaks"><span>—</span></div>
+    </div>
+    <canvas id="spec" aria-label="Frekans spektrumu, 20 Hz ile 20 kHz arası logaritmik eksen"></canvas>
+    <canvas id="wf" aria-label="Zaman–frekans şelale görüntüsü"></canvas>
+    <div class="row">
+      <button class="primary grow" id="btnAnalyze">Dinle</button>
+      <button class="ghost" id="btnFreeze" aria-pressed="false">Dondur</button>
+      <button class="ghost" id="btnHold" aria-pressed="true">Tepe izi</button>
+    </div>
+    <div class="row">
+      <label>Kaynak
+        <select id="src">
+          <option value="mic">Mikrofon</option>
+          <option value="loop">Dahili döngü (test)</option>
+        </select>
+      </label>
+      <label>FFT boyu
+        <select id="fft">
+          <option value="4096">4096</option>
+          <option value="8192">8192</option>
+          <option value="16384" selected>16384</option>
+          <option value="32768">32768</option>
+        </select>
+      </label>
+      <label>Yumuşatma
+        <select id="smooth">
+          <option value="0">Yok</option>
+          <option value="0.5" selected>Orta</option>
+          <option value="0.8">Yüksek</option>
+        </select>
+      </label>
+      <label>Eşik (dB)
+        <select id="thr">
+          <option value="-90">−90</option>
+          <option value="-80">−80</option>
+          <option value="-70" selected>−70</option>
+          <option value="-60">−60</option>
+          <option value="-50">−50</option>
+        </select>
+      </label>
+    </div>
+    <div class="err" id="anErr" role="status"></div>
+  </section>
+
+  <section class="panel" aria-label="Ton üreteci">
+    <div class="label">Ton üreteci · hoparlör çıkışı</div>
+    <div class="gen-top">
+      <label class="freq-in" for="freq">
+        <input type="text" id="freq" inputmode="decimal" value="1000" autocomplete="off" aria-label="Frekans (Hz), 20 ile 20000 arası">
+        <span>Hz</span>
+      </label>
+      <button class="primary" id="btnTone">Sesi çal</button>
+    </div>
+    <input type="range" id="freqSlider" min="0" max="1000" step="1" aria-label="Frekans kaydırıcısı (logaritmik)">
+    <div class="steps">
+      <button class="small" data-step="-100">−100</button>
+      <button class="small" data-step="-10">−10</button>
+      <button class="small" data-step="-1">−1</button>
+      <button class="small" data-step="1">+1</button>
+      <button class="small" data-step="10">+10</button>
+      <button class="small" data-step="100">+100</button>
+    </div>
+    <div class="presets">
+      <button class="small" data-f="50">50</button>
+      <button class="small" data-f="100">100</button>
+      <button class="small" data-f="440">440</button>
+      <button class="small" data-f="1000">1k</button>
+      <button class="small" data-f="5000">5k</button>
+      <button class="small" data-f="10000">10k</button>
+      <button class="small" data-f="15000">15k</button>
+      <button class="small" data-f="20000">20k</button>
+    </div>
+    <div class="row">
+      <label>Dalga
+        <select id="wave">
+          <option value="sine" selected>Sinüs</option>
+          <option value="square">Kare</option>
+          <option value="triangle">Üçgen</option>
+          <option value="sawtooth">Testere</option>
+        </select>
+      </label>
+      <label class="grow">Ses düzeyi: <span id="volTxt">−12 dBFS</span>
+        <input type="range" id="vol" min="-60" max="0" step="1" value="-12">
+      </label>
+    </div>
+    <div class="err" id="genErr" role="status"></div>
+  </section>
+
+  <details class="note">
+    <summary>Kullanım notları</summary>
+    <ul>
+      <li>Telefon mikrofonları genelde 50 Hz altında ve 16–18 kHz üstünde zayıflar; bu bölgelerde okunan seviye gerçek seviyenin altındadır. dB değerleri kalibre değildir (dBFS).</li>
+      <li>iPhone'da sessiz anahtarı açıksa hoparlörden ses gelmeyebilir. Mikrofon açıkken iOS sesi kulaklığa yönlendirebilir; o durumda hoparlör seviyesi düşük kalır.</li>
+      <li>Sistem doğrulaması: Kaynak = “Dahili döngü” seçip ton çalın. Ekrandaki frekans girdiğiniz değerle eşleşmelidir (mikrofonsuz test).</li>
+      <li>Akustik test: Kaynak = Mikrofon, ton çalın; hoparlörden çıkan ses mikrofonla ölçülür.</li>
+      <li>Ana ekrana ekleyerek uygulama gibi açabilirsiniz (Safari: Paylaş → Ana Ekrana Ekle; Chrome: ⋮ → Uygulamayı yükle).</li>
+    </ul>
+  </details>
+</div>
+
+<script>
+(() => {
+  "use strict";
+  const $ = id => document.getElementById(id);
+  const FMIN = 20, FMAX = 20000, DBMIN = -120, DBMAX = 0;
+  // AnalyserNode Blackman penceresi kullanır (tutarlı kazanç 0,42) ve 1/N ile ölçekler.
+  // Bu düzeltmeyle sinüs tepesi, sinüsün genliğini dBFS olarak verir (−12 dBFS ton → −12 dB).
+  const CORR = 20 * Math.log10(2 / 0.42);
+  const NOTE = ["Do","Do♯","Re","Re♯","Mi","Fa","Fa♯","Sol","Sol♯","La","La♯","Si"];
+
+  let ac = null, analyser = null, toneGain = null, loopTap = null;
+  let micStream = null, micNode = null, osc = null;
+  let running = false, frozen = false, holdOn = true, raf = 0, lastText = 0, wakeLock = null;
+  let freqData, timeData, holdCols, colMap = [], cols = null;
+
+  if (!window.isSecureContext) $("secureWarn").hidden = false;
+
+  /* ---------- Ses bağlamı ---------- */
+  function ensureCtx() {
+    if (!ac) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) throw new Error("Bu tarayıcı Web Audio desteklemiyor.");
+      ac = new AC();
+      analyser = ac.createAnalyser();
+      toneGain = ac.createGain(); toneGain.gain.value = 0;
+      toneGain.connect(ac.destination);
+      loopTap = ac.createGain(); loopTap.gain.value = 0;
+      toneGain.connect(loopTap); loopTap.connect(analyser);
+      applyAnalyser();
+    }
+    return ac.state === "suspended" ? ac.resume() : Promise.resolve();
+  }
+
+  function applyAnalyser() {
+    if (!analyser) return;
+    analyser.fftSize = +$("fft").value;
+    analyser.smoothingTimeConstant = +$("smooth").value;
+    freqData = new Float32Array(analyser.frequencyBinCount);
+    timeData = new Float32Array(analyser.fftSize);
+    buildColMap();
+    updateMeta();
+  }
+
+  function updateMeta() {
+    if (!ac) return;
+    const bin = ac.sampleRate / analyser.fftSize;
+    $("meta").textContent = `${(ac.sampleRate/1000).toFixed(1)} kHz örnekleme · çözünürlük ${bin.toFixed(2)} Hz · ${running ? "dinleniyor" : "durdu"}`;
+  }
+
+  /* ---------- Çizim ölçekleri ---------- */
+  const spec = $("spec"), wf = $("wf");
+  const sctx = spec.getContext("2d"), wctx = wf.getContext("2d");
+  let W = 0, H = 0, WH = 0, dpr = 1;
+  const fToX = f => Math.log(f / FMIN) / Math.log(FMAX / FMIN) * W;
+  const xToF = x => FMIN * Math.pow(FMAX / FMIN, x / W);
+  const dbToY = db => (DBMAX - db) / (DBMAX - DBMIN) * H;
+
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const r = spec.getBoundingClientRect(), r2 = wf.getBoundingClientRect();
+    W = Math.max(50, Math.round(r.width * dpr)); H = Math.round(r.height * dpr);
+    spec.width = W; spec.height = H;
+    const keep = wf.width === W ? wctx.getImageData(0, 0, wf.width, wf.height) : null;
+    wf.width = W; WH = Math.round(r2.height * dpr); wf.height = WH;
+    wctx.fillStyle = "#0a0f14"; wctx.fillRect(0, 0, W, WH);
+    if (keep) wctx.putImageData(keep, 0, 0);
+    buildColMap();
+    drawSpectrum();
+  }
+
+  function buildColMap() {
+    if (!W || !ac) return;
+    const bin = ac.sampleRate / analyser.fftSize, n = analyser.frequencyBinCount;
+    colMap = new Array(W);
+    for (let x = 0; x < W; x++) {
+      const b0 = xToF(x) / bin, b1 = xToF(x + 1) / bin;
+      colMap[x] = [b0, Math.min(b1, n - 1)];
+    }
+    cols = new Float32Array(W).fill(DBMIN);
+    holdCols = new Float32Array(W).fill(DBMIN);
+  }
+
+  function computeCols() {
+    for (let x = 0; x < W; x++) {
+      const [b0, b1] = colMap[x];
+      let v;
+      if (b1 - b0 < 1) {                       // düşük frekans: kutular arası doğrusal ara değer
+        const c = (b0 + b1) / 2, i = Math.floor(c), t = c - i;
+        v = freqData[i] * (1 - t) + freqData[Math.min(i + 1, freqData.length - 1)] * t;
+      } else {                                 // yüksek frekans: sütundaki en büyük kutu
+        v = -Infinity;
+        for (let i = Math.floor(b0); i <= Math.ceil(b1); i++) if (freqData[i] > v) v = freqData[i];
+      }
+      v = isFinite(v) ? v + CORR : DBMIN;
+      cols[x] = v;
+      holdCols[x] = Math.max(v, holdCols[x] - 0.25 * dpr);
+    }
+  }
+
+  const GRID_F = [20,50,100,200,500,1000,2000,5000,10000,20000];
+  function drawGrid() {
+    sctx.fillStyle = "#0a0f14"; sctx.fillRect(0, 0, W, H);
+    sctx.lineWidth = 1; sctx.font = `${11*dpr}px ui-monospace,Menlo,Consolas,monospace`;
+    sctx.strokeStyle = "#1c2833"; sctx.fillStyle = "#6f8193";
+    sctx.textBaseline = "top";
+    for (let db = -20; db > DBMIN; db -= 20) {
+      const y = Math.round(dbToY(db)) + .5;
+      sctx.beginPath(); sctx.moveTo(0, y); sctx.lineTo(W, y); sctx.stroke();
+      sctx.textAlign = "left"; sctx.fillText(`${db}`, 4 * dpr, y + 2 * dpr);
+    }
+    sctx.textBaseline = "bottom";
+    GRID_F.forEach((f, i) => {
+      const x = Math.round(fToX(f)) + .5;
+      sctx.beginPath(); sctx.moveTo(x, 0); sctx.lineTo(x, H); sctx.stroke();
+      sctx.textAlign = i === 0 ? "left" : i === GRID_F.length - 1 ? "right" : "center";
+      sctx.fillText(f >= 1000 ? `${f/1000}k` : `${f}`, x + (i === 0 ? 3*dpr : i === GRID_F.length-1 ? -3*dpr : 0), H - 3 * dpr);
+    });
+  }
+
+  function drawSpectrum(peakF) {
+    if (!W) return;
+    drawGrid();
+    if (!cols || !running && !frozen) return;
+    const grad = sctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, "rgba(255,179,71,.45)"); grad.addColorStop(1, "rgba(255,179,71,.02)");
+    sctx.beginPath(); sctx.moveTo(0, H);
+    for (let x = 0; x < W; x++) sctx.lineTo(x, dbToY(cols[x]));
+    sctx.lineTo(W, H); sctx.closePath(); sctx.fillStyle = grad; sctx.fill();
+    sctx.beginPath();
+    for (let x = 0; x < W; x++) { const y = dbToY(cols[x]); x ? sctx.lineTo(x, y) : sctx.moveTo(x, y); }
+    sctx.strokeStyle = "#ffb347"; sctx.lineWidth = 1.5 * dpr; sctx.stroke();
+    if (holdOn) {
+      sctx.beginPath();
+      for (let x = 0; x < W; x++) { const y = dbToY(holdCols[x]); x ? sctx.lineTo(x, y) : sctx.moveTo(x, y); }
+      sctx.strokeStyle = "rgba(95,209,196,.75)"; sctx.lineWidth = 1 * dpr; sctx.stroke();
+    }
+    const thrY = dbToY(+$("thr").value);
+    sctx.setLineDash([4*dpr, 4*dpr]); sctx.strokeStyle = "rgba(133,151,168,.5)"; sctx.lineWidth = 1;
+    sctx.beginPath(); sctx.moveTo(0, thrY); sctx.lineTo(W, thrY); sctx.stroke(); sctx.setLineDash([]);
+    if (peakF) {
+      const x = fToX(peakF);
+      sctx.strokeStyle = "#ffffff"; sctx.globalAlpha = .55; sctx.lineWidth = 1 * dpr;
+      sctx.beginPath(); sctx.moveTo(x, 0); sctx.lineTo(x, H); sctx.stroke(); sctx.globalAlpha = 1;
+    }
+  }
+
+  // Şelale renk haritası: koyu lacivert → camgöbeği → kehribar → beyaz
+  const CMAP = (() => {
+    const stops = [[0,[10,15,20]],[.35,[20,60,90]],[.6,[60,170,170]],[.82,[255,179,71]],[1,[255,245,225]]];
+    const out = new Uint8ClampedArray(256 * 3);
+    for (let i = 0; i < 256; i++) {
+      const t = i / 255; let k = 0; while (t > stops[k + 1][0]) k++;
+      const [t0, c0] = stops[k], [t1, c1] = stops[k + 1], u = (t - t0) / (t1 - t0);
+      for (let j = 0; j < 3; j++) out[i * 3 + j] = c0[j] + (c1[j] - c0[j]) * u;
+    }
+    return out;
+  })();
+  let wfRow = null;
+  function drawWaterfall() {
+    if (!wfRow || wfRow.width !== W) wfRow = wctx.createImageData(W, 1);
+    wctx.drawImage(wf, 0, 0, W, WH - 1, 0, 1, W, WH - 1);
+    const d = wfRow.data;
+    for (let x = 0; x < W; x++) {
+      const t = Math.max(0, Math.min(1, (cols[x] - (-110)) / 90));
+      const c = Math.round(t * 255) * 3;
+      d[x*4] = CMAP[c]; d[x*4+1] = CMAP[c+1]; d[x*4+2] = CMAP[c+2]; d[x*4+3] = 255;
+    }
+    wctx.putImageData(wfRow, 0, 0);
+  }
+
+  /* ---------- Tepe bulma ---------- */
+  function interp(k) {          // parabolik ara değer: alt-kutu hassasiyeti
+    const a = freqData[k - 1], b = freqData[k], c = freqData[k + 1];
+    const den = a - 2 * b + c;
+    const p = den !== 0 ? 0.5 * (a - c) / den : 0;
+    return { k: k + Math.max(-.5, Math.min(.5, p)), db: b - 0.25 * (a - c) * p + CORR };
+  }
+  function findPeaks(thr) {
+    const bin = ac.sampleRate / analyser.fftSize;
+    const k0 = Math.max(2, Math.ceil(FMIN / bin)), k1 = Math.min(freqData.length - 3, Math.ceil(FMAX / bin) + 1);
+    const cands = [];
+    for (let k = k0; k <= k1; k++) {
+      const v = freqData[k];
+      if (v + CORR > thr && v >= freqData[k - 1] && v > freqData[k + 1] && v >= freqData[k - 2] && v > freqData[k + 2]) {
+        const r = interp(k), f = r.k * bin;
+        if (f >= FMIN * 0.995 && f <= FMAX * 1.005) cands.push({ f, db: r.db });
+      }
+    }
+    cands.sort((a, b) => b.db - a.db);
+    const out = [];
+    for (const c of cands) {
+      if (out.every(o => Math.abs(Math.log2(c.f / o.f)) > 1 / 24)) out.push(c);
+      if (out.length === 5) break;
+    }
+    return out;
+  }
+
+  const fmtHz = f => f >= 10000 ? f.toFixed(0) : f >= 1000 ? f.toFixed(1) : f.toFixed(2);
+  const fmtShort = f => f >= 1000 ? (f / 1000).toFixed(f >= 10000 ? 2 : 3) + " kHz" : f.toFixed(1) + " Hz";
+  function noteOf(f) {
+    const n = 12 * Math.log2(f / 440) + 69, r = Math.round(n), cents = Math.round((n - r) * 100);
+    return `${NOTE[((r % 12) + 12) % 12]}${Math.floor(r / 12) - 1} ${cents >= 0 ? "+" : "−"}${Math.abs(cents)}¢`;
+  }
+
+  /* ---------- Döngü ---------- */
+  function frame(t) {
+    raf = requestAnimationFrame(frame);
+    if (frozen) return;
+    analyser.getFloatFrequencyData(freqData);
+    analyser.getFloatTimeDomainData(timeData);
+    computeCols();
+    const peaks = findPeaks(+$("thr").value);
+    drawSpectrum(peaks[0] && peaks[0].f);
+    drawWaterfall();
+    if (t - lastText > 120) {     // sayılar okunabilsin diye ~8 Hz güncelleme
+      lastText = t;
+      let s = 0; for (let i = 0; i < timeData.length; i++) s += timeData[i] * timeData[i];
+      const rms = 10 * Math.log10(s / timeData.length + 1e-20);
+      $("rmsDb").textContent = `${rms < -119 ? "−∞" : rms.toFixed(1).replace("-", "−")} dBFS`;
+      if (peaks.length) {
+        const p = peaks[0];
+        $("peakHz").innerHTML = `${fmtHz(p.f)}<small>Hz</small>`;
+        $("peakNote").textContent = noteOf(p.f);
+        $("peakDb").textContent = `${p.db.toFixed(1).replace("-", "−")} dB`;
+        $("peaks").innerHTML = peaks.map(q => `<span>${fmtShort(q.f)}<em>${q.db.toFixed(0).replace("-", "−")} dB</em></span>`).join("");
+      } else {
+        $("peakHz").innerHTML = `—<small>Hz</small>`;
+        $("peakNote").textContent = "—"; $("peakDb").textContent = "— dB";
+        $("peaks").innerHTML = `<span>eşiğin üstünde tepe yok</span>`;
+      }
+    }
+  }
+
+  async function startAnalysis() {
+    $("anErr").textContent = "";
+    await ensureCtx();
+    if ($("src").value === "mic") {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia)
+        throw new Error("Mikrofon erişimi yok. Sayfayı https:// adresinden açın.");
+      micStream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+      });
+      micNode = ac.createMediaStreamSource(micStream);
+      micNode.connect(analyser);
+      loopTap.gain.value = 0;
+    } else {
+      loopTap.gain.value = 1;
+    }
+    running = true; frozen = false; setFreezeBtn();
+    buildColMap();
+    cancelAnimationFrame(raf); raf = requestAnimationFrame(frame);
+    $("btnAnalyze").textContent = "Durdur"; $("btnAnalyze").classList.add("on");
+    try { wakeLock = await navigator.wakeLock?.request("screen"); } catch (_) {}
+    updateMeta();
+  }
+
+  function stopAnalysis() {
+    running = false; cancelAnimationFrame(raf);
+    if (micNode) { micNode.disconnect(); micNode = null; }
+    if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+    if (loopTap) loopTap.gain.value = 0;
+    $("btnAnalyze").textContent = "Dinle"; $("btnAnalyze").classList.remove("on");
+    try { wakeLock && wakeLock.release(); } catch (_) {} wakeLock = null;
+    updateMeta();
+  }
+
+  $("btnAnalyze").addEventListener("click", async () => {
+    if (running) return stopAnalysis();
+    try { await startAnalysis(); }
+    catch (e) {
+      stopAnalysis();
+      $("anErr").textContent = e && e.name === "NotAllowedError"
+        ? "Mikrofon izni verilmedi. Tarayıcı ayarlarından bu siteye mikrofon izni verip tekrar deneyin."
+        : e && e.name === "NotFoundError" ? "Mikrofon bulunamadı." : (e && e.message) || String(e);
+    }
+  });
+  const restartIfRunning = async () => { if (running) { stopAnalysis(); try { await startAnalysis(); } catch (e) { $("anErr").textContent = e.message || String(e); } } };
+  $("src").addEventListener("change", restartIfRunning);
+  $("fft").addEventListener("change", applyAnalyser);
+  $("smooth").addEventListener("change", () => analyser && (analyser.smoothingTimeConstant = +$("smooth").value));
+  function setFreezeBtn() { $("btnFreeze").setAttribute("aria-pressed", frozen); $("btnFreeze").textContent = frozen ? "Devam" : "Dondur"; }
+  $("btnFreeze").addEventListener("click", () => { if (!running) return; frozen = !frozen; setFreezeBtn(); });
+  $("btnHold").addEventListener("click", () => {
+    holdOn = !holdOn; $("btnHold").setAttribute("aria-pressed", holdOn);
+    if (holdCols) holdCols.fill(DBMIN);
+  });
+
+  /* ---------- Ton üreteci ---------- */
+  let curF = 1000;
+  const sliderToF = v => FMIN * Math.pow(FMAX / FMIN, v / 1000);
+  const fToSlider = f => Math.round(Math.log(f / FMIN) / Math.log(FMAX / FMIN) * 1000);
+
+  function parseFreq(str) {
+    const s = String(str).trim().replace(/\s/g, "").replace(",", ".").toLowerCase();
+    const m = s.match(/^(\d+(?:\.\d+)?)(k)?(hz)?$/);
+    if (!m) return null;
+    return parseFloat(m[1]) * (m[2] ? 1000 : 1);
+  }
+  function setFreq(f, from) {
+    $("genErr").textContent = "";
+    if (f == null || !isFinite(f)) { $("genErr").textContent = "Geçerli bir sayı girin (ör. 440 veya 1,5k)."; return; }
+    if (f < FMIN || f > FMAX) { $("genErr").textContent = `Frekans ${FMIN}–${FMAX} Hz arasında olmalı.`; f = Math.max(FMIN, Math.min(FMAX, f)); }
+    curF = Math.round(f * 100) / 100;
+    if (from !== "input") $("freq").value = String(curF).replace(".", ",");
+    if (from !== "slider") $("freqSlider").value = fToSlider(curF);
+    if (osc) osc.frequency.setTargetAtTime(curF, ac.currentTime, 0.01);
+  }
+  $("freq").addEventListener("change", () => setFreq(parseFreq($("freq").value)));
+  $("freq").addEventListener("keydown", e => { if (e.key === "Enter") { setFreq(parseFreq($("freq").value)); $("freq").blur(); } });
+  $("freqSlider").addEventListener("input", e => {
+    const f = sliderToF(+e.target.value);
+    setFreq(f < 100 ? Math.round(f * 10) / 10 : Math.round(f), "slider");
+  });
+  document.querySelectorAll("[data-step]").forEach(b => b.addEventListener("click", () => setFreq(curF + +b.dataset.step)));
+  document.querySelectorAll("[data-f]").forEach(b => b.addEventListener("click", () => setFreq(+b.dataset.f)));
+
+  const volLin = () => Math.pow(10, +$("vol").value / 20);
+  $("vol").addEventListener("input", () => {
+    $("volTxt").textContent = `${$("vol").value.replace("-", "−")} dBFS`;
+    if (osc) toneGain.gain.setTargetAtTime(volLin(), ac.currentTime, 0.02);
+  });
+  $("wave").addEventListener("change", () => { if (osc) osc.type = $("wave").value; });
+
+  async function startTone() {
+    await ensureCtx();
+    osc = ac.createOscillator();
+    osc.type = $("wave").value;
+    osc.frequency.value = curF;
+    osc.connect(toneGain);
+    osc.start();
+    toneGain.gain.cancelScheduledValues(ac.currentTime);
+    toneGain.gain.setValueAtTime(0, ac.currentTime);
+    toneGain.gain.setTargetAtTime(volLin(), ac.currentTime, 0.02);   // tık sesini önleyen yumuşak giriş
+    $("btnTone").textContent = "Sesi durdur"; $("btnTone").classList.add("on");
+  }
+  function stopTone() {
+    const o = osc; osc = null;
+    toneGain.gain.cancelScheduledValues(ac.currentTime);
+    toneGain.gain.setTargetAtTime(0, ac.currentTime, 0.015);
+    setTimeout(() => { try { o.stop(); o.disconnect(); } catch (_) {} }, 150);
+    $("btnTone").textContent = "Sesi çal"; $("btnTone").classList.remove("on");
+  }
+  $("btnTone").addEventListener("click", async () => {
+    setFreq(parseFreq($("freq").value));
+    try { osc ? stopTone() : await startTone(); }
+    catch (e) { $("genErr").textContent = e.message || String(e); }
+  });
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && ac && ac.state !== "running" && (running || osc)) ac.resume();
+  });
+  window.addEventListener("resize", resize);
+  setFreq(1000);
+  resize();
+
+  if ("serviceWorker" in navigator && window.isSecureContext) {
+    navigator.serviceWorker.register("sw.js").catch(() => {});
+  }
+})();
+</script>
+</body>
+</html>
