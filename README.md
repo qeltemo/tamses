@@ -1,0 +1,2 @@
+# tamses
+ses frekans analiz
